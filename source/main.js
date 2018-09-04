@@ -32,7 +32,8 @@
   ],
   replaceMsgs       : [
     {orig:/^![a-zA-Z]+/, to:"{no_display}"}
-  ]
+  ],
+  scale             : 1
 };
 
 function getParameterByName(name, url) {
@@ -954,3 +955,12 @@ var client = (function() {
         configData.retryInterval * 1000 );
   }
 }) ();
+
+(function () {
+  document.body.setAttribute(
+    "style",
+    "width: " + (100 / configData.scale) + "%;" +
+      "transform-origin: left bottom;" +
+      "transform: scale(" + configData.scale + ");"
+  );
+})();
