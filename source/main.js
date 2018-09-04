@@ -21,7 +21,7 @@
   webSocket         : "wss://irc-ws.chat.twitch.tv:443",
   nick              : "justinfan16845",
   pass              : "foobar",
-  channel           : "#nesswit",
+  channel           : "nesswit",
   retryInterval     : 2,
   allMessageHandle  : false,
   muteUser          : ["Nightbot", "Ssakdook", "Hibiya_bot", "Yousa_bot", "Stay_hydrated_bot"],
@@ -255,9 +255,9 @@ var applyMessage = function(message, data) {
 /* 설정 파일 확인 및 디버그 내용 출력 함수 정의 */
 var completeCount = 0;
 var checkComplete = function() {
-  /* CSS, 디씨콘, 이모티콘+구독콘, 후원아이콘, 설정, 그리고 서버 */
-  var num = 5 + configData.channel.match(/#/g).length;
-  if (++completeCount == num) {
+  /* CSS, 디씨콘, 이모티콘+구독콘, 후원아이콘, 설정*/
+  var num = 5;
+  if (completeCount == num) {
     var chat = addChatMessage("",
       '<center><div style="' +
       "display:inline-block; white-space:pre; line-height:1em; " +
@@ -700,7 +700,7 @@ var client = (function() {
     ws.send("PASS " + configData.pass + "\r\n");
     ws.send("NICK " + configData.nick + "\r\n");
     ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership' + "\r\n");
-    ws.send("JOIN " + configData.channel + "\r\n");
+    ws.send("JOIN #" + configData.channel + "\r\n");
   }
   var onmessageEventHandler = function(evt) {
     var lines = evt.data.toString().split(/\r\n|\r|\n/);
@@ -734,7 +734,7 @@ var client = (function() {
             debugLog(
               args[2].substring(1) + "에 접속했습니다.");
           }
-          if(++joinCount <= configData.channel.match(/#/g).length) {
+          if(++joinCount <= 1) {
             checkComplete();
           }
           break;
