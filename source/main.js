@@ -1,4 +1,4 @@
-﻿/* 기본 설정 */
+/* 기본 설정 */
 configDefault = {
   numChatMax        : 20,               // html에 한꺼번에 표시될 수 있는 메세지의 최대 갯수
   personalColor     : false,            /* 이름 색깔을 트위치 이름색과 일치시킬지
@@ -43,10 +43,14 @@ configDefault = {
   commands          : [
     {exe:"clear", msg:"!!clear"},
     {exe:"theme", msg:"!!theme"},
-    {exe:"load", msg:"!!load"}
+    {exe:"load", msg:"!!load"},
+    {exe:"scale", msg:"!!scale"}
   ],                                    // 활성화시킬 명령어
-  replaceMsgs       : [],               // 봇 메세지 등을 대체
-  scale             : 1                 // 화면의 확대/축소 배율 조정
+  replaceMsgs       : []                /* 봇 메세지 등을 대체
+                                           {
+                                             orig: 원문(문자열 또는 정규표현식),
+                                             to: 대체할 문자열("{no_display}"로 미표시)
+                                            }                                         */
 };
 
 
@@ -64,6 +68,75 @@ var replaceMsgFormat = function(message, amount) {
     retMessage = retMessage.replace(/\{!0:([^\}]*)}/g, "$1").replace(/\{0:([^\}]*)}/g, "");
   }
   return retMessage;
+}
+var getRemoveTimeout = function(box) {
+  return function() {
+    if ((box||{}).parentElement != null) {
+      box.remove();
+      --numChat;
+    }
+  };
+}
+var timeToMs = function(time) {
+  var num = time.split(/[a-z]/i)[0];
+  try { num = Number(num); }
+  catch(e) { return 0; }
+
+  var isMs = /ms/.test(time);
+  return num * (isMs? 1: 1000);
+}
+var applyMessageRemove = function(box) {
+  // 기존 타이머를 정리
+  if (box.timeout) { clearTimeout(box.timeout); }
+  if (!box.nodeType) { return; }
+
+  // CSS 애니메이션 적용
+  if (configData.msgAniDuration) {
+    var computedStyle = getComputedStyle(box);
+    var origName = computedStyle.animationName;
+    var origDuration = computedStyle.animationDuration;
+    var origAnimation = computedStyle.animation;
+    var origDirection = computedStyle.animationDirection;
+
+    box.classList.add("remove");
+    var newName = computedStyle.animationName;
+    var newDuration = computedStyle.animationDuration;
+
+    var condOrig = (origName != "none");
+    var condNew = (newName != "none");
+    var condSame = (origName == newName);
+
+    if (!condNew && !condOrig) {
+    // 애니메이션이 하나도 없을 경우 그냥 삭제
+      (getRemoveTimeout(box))();
+      return;
+    }
+
+    if (condOrig && (condNew == condSame)) {
+    // 메세지 삭제 애니메이션만 없을 경우 생성 애니메이션을 반전
+      box.style.animation = origAnimation;
+      box.style.animationDirection = {
+        "normal": "reverse", "alternate": "alternate-reverse",
+        "reverse": "normal", "alternate-reverse": "alternate"
+      }[origDirection] || "reverse";
+    }
+
+    if (configData.msgAniDuration > 0) {
+    // 애니메이션 시간을 적용
+      newDuration = configData.msgAniDuration + "s";
+      box.style.animationDuration = newDuration;
+    }
+
+
+    box.timeout = setTimeout(
+      getRemoveTimeout(box),
+      timeToMs(newDuration) || timeToMs(origDuration)
+    );
+  } else {
+  // 메세지 삭제 애니메이션 무시
+    (getRemoveTimeout(box))();
+    return;
+  }
 }
 addChatMessage = function(nick, message, data) {
 
@@ -156,17 +229,11 @@ addChatMessage = function(nick, message, data) {
 
 
   // 메세지 타임아웃 설정
-  var fadeoutTime = 0;
-  if (configData.msgExistDuration) { fadeoutTime += configData.msgExistDuration * 1000; }
-  if (configData.msgAniDuration) { fadeoutTime += configData.msgAniDuration * 1000; }
-
-  if (fadeoutTime != 0) {
-    setTimeout( function() {
-      if (chatOuterBox.parentElement != null) {
-        chatOuterBox.remove();
-        --numChat;
-      }
-    }, fadeoutTime );
+  if (configData.msgExistDuration > 0) {
+    setTimeout(
+      function() { applyMessageRemove(chatOuterBox); },
+      configData.msgExistDuration*1000
+    );
   }
 
   // 넘치는 메세지를 삭제
@@ -216,9 +283,10 @@ var applyMessage = function(message, data) {
 
   // HTML 이스케이핑
   if ((data.escape == undefined) || (data.escape == true)) {
-    message = message.replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    message = message.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
+  message = applyReplace(message, data);
   message = applyTwitchCon(message, data);
   message = applyCheerIcon(message, data);
   message = applyDcCon(message, data);
@@ -229,23 +297,79 @@ var applyMessage = function(message, data) {
 }
 
 /* URL에서 설정값을 가져와 덮어쓰기 */
-var getParameterByName = function(name) {
-  name = name.replace(/[\[\]]/g, '\\$&');
-  var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)');
-  var results = regex.exec(window.location.href);
-  if (!results) return null;
-  if (!results[2]) return '';
-  return decodeURIComponent(results[2].replace(/\+/g, ' '));
-}
-for (var configKey in configDefault) {
-  var queryData = getParameterByName(configKey);
-  if (queryData !== null && queryData !== undefined) {
-    if (configKey === "channel") {
-      queryData = "#" + queryData;
-    }
-    configData[configKey] = queryData;
+if (window.location.href.indexOf("?") != -1) {
+  var queries = window.location.search;
+  if (queries||"".length > 0) {
+    queries.slice(1).split("&").forEach( function(queryData) {
+      var value = queryData.split("=");
+      var key = value.shift();
+      value = value[0];
+
+      if ((value!=undefined) && configDefault.hasOwnProperty(key)) {
+        switch (key) {
+          case "scale":
+            if (!isNaN(scale)) { window.localStorage.setItem("scale", value); }
+            return;
+
+          case "channel":
+            configData.channel = value.split(",").map( function(channel) {
+              return "#" + channel;
+            } ).join(",");
+            return;
+
+          case "muteUser":
+            configData.muteUser = (value==="")? []: value.split(",");
+            return;
+
+          case "webSocket":
+          case "nick":
+          case "pass":
+            return;
+
+          default:
+            break;
+        }
+
+        switch (typeof(configDefault[key])) {
+          case "object":
+            return;
+
+          case "boolean":
+            configData[key] = (value === "true");
+            return;
+
+          case "number":
+            var numberValue = Number(value);
+            if (!isNaN(numberValue)) { configData[key] = numberValue; }
+            return;
+
+          case "string":
+          default:
+            break;
+        }
+
+        configData[key] = value;
+      }
+    } );
   }
 }
+
+
+
+/* 배율 설정 적용 */
+var setScale = function() {
+  var scale = window.localStorage.getItem("scale");
+  if (!scale) { return; }
+
+  with (document.body.style) {
+    width = (10000 / scale) + "%";
+    transformOrigin = "left bottom";
+    transform = "scale(" + scale/100 + ")";
+  }
+}
+setScale();
+
+
 
 /* 설정 파일 확인 및 디버그 내용 출력 함수 정의 */
 var completeCount = 0;
@@ -286,12 +410,21 @@ debugLog = function(dat) {};
   var configDataLength = Object.keys(configData).length;
 
   if (configDataLength == 0) {
-    configLoadMessage = "설정 파일(lib/config.js)을 로드하는 데 문제가 생겨 기본 설정을 사용합니다. ";
+    configLoadMessage = "설정 파일(lib/config.js)을 로드하는 데 문제가 생겨 기본 설정을 사용합니다.<br />";
     Object.assign(configData, configDefault);
   }
-  else if (configDataLength < Object.keys(configDefault).length) {
-    configLoadMessage = "일부 설정값을 찾을 수 없어 기본값을 사용합니다. ";
-    configData = Object.assign(JSON.parse(JSON.stringify(configDefault)), configData);
+  else {
+    var unloadedConfigs = Object.keys(configDefault).reduce( function(acc, cur) {
+      if (configData[cur] === undefined) {
+        configData[cur] = JSON.parse(JSON.stringify(configDefault[cur]));
+        return (++acc);
+      }
+      return acc;
+    }, 0 );
+
+    if (unloadedConfigs > 0) {
+      configLoadMessage = "일부 설정값을 찾을 수 없어 기본값을 사용합니다.<br />";
+    }
   }
 
   if (configData.debugLevel != 0) {
@@ -316,7 +449,7 @@ debugLog = function(dat) {};
 
 
 
-/* 특정 메세지 대체 */
+/* 지정 메세지 대체 */
 if ((configData.replaceMsgs) && (configData.replaceMsgs.length>0)) {
   applyReplace = function(message, data) {
     for(var index in configData.replaceMsgs) {
@@ -505,7 +638,7 @@ if (configData.loadTwitchCons) {
 
     // 가공된 데이터를 이용해 메세지를 변조
     Object.keys(emotes)
-      .sort(function(a,b) { return b.length - a.length; } )
+      .sort( function(a,b) { return b.length - a.length; } )
       .forEach( function(emote) {
         var emoteRegExp = new RegExp(
           "( |^)(" + emote
@@ -613,16 +746,29 @@ var commandExecute = function(exe, arg) {
     }
 
   case "load" :
-    console.log(arg);
     if (arg == "" || arg == "디씨콘" || arg == "디시콘" || arg == "dccon") {
       loadDcCon();
       return true;
     }
+    break;
+
+  case "scale":
+    if (arg == "") {
+      debugLog("현재 배율 : " + (window.localStorage.getItem("scale")||100) + "%");
+      return true;
+    }
+    if (!isNaN(arg)) {
+      window.localStorage.setItem("scale", Number(arg));
+      setScale();
+      return true;
+    }
+    break;
 
   default:
-    debugLog("잘못된 명령어입니다.");
-    return false;
+    break;
   }
+  debugLog("잘못된 명령어입니다.");
+  return false;
 }
 
 
@@ -635,7 +781,7 @@ defaultColors = [
   "#5F9EA0", "#1E90FF", "#FF69B4", "#8A2BE2", "#00FF7F"];
 debugLog("트위치에 접속을 시도합니다.");
 manageMessage = function() {}; // 받은 명령어 처리 함수
-var client = (function() {
+var client = function() {
   ws = new WebSocket(configData.webSocket);
 
   ws.onopen = function() {
@@ -865,12 +1011,5 @@ var client = (function() {
         function() { client(); },
         configData.retryInterval * 1000 );
   }
-}) ();
-
-// 확대/축소
-document.body.setAttribute(
-  "style",
-  "width: " + (100 / configData.scale) + "%;" +
-  "transform-origin: left bottom;" +
-  "transform: scale(" + configData.scale + ");"
-);
+};
+client();
